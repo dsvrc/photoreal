@@ -2,3 +2,6 @@
 *.pt
 !dataset/*/data_stats.pth
 dataset
+.setup_cache/
+setup_*.log
+server_info_*.log
