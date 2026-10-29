@@ -3,18 +3,27 @@
 # (conda + pip, python 3.9, torch 2.0.1 with CUDA 11.7/11.8 wheels, pytorch3d).
 #
 # Why plain `pip install -r scripts/requirements.txt` fails:
-#   pip >= 24.1 rejects the metadata of omegaconf 2.0.6 (needed by fairseq 0.12.2),
-#   so pip backtracks to the broken fairseq 0.12.1 sdist and dies with
-#   "FileNotFoundError: fairseq/version.txt". Pinning pip < 24.1 fixes it.
+#   - pip >= 24.1 rejects the metadata of omegaconf 2.0.6 (needed by fairseq 0.12.2), so pip
+#     backtracks to the broken fairseq 0.12.1 sdist ("FileNotFoundError: fairseq/version.txt").
+#     Pinning pip < 24.1 fixes that.
+#   - fairseq 0.12.2 has no Linux wheel on PyPI and its sdist is missing
+#     clib/libbase/balanced_assignment.cpp, so we build it from the GitHub v0.12.2 source.
 #
 # Usage (from anywhere, on a node with internet access):
 #   bash scripts/setup_env.sh                # create/reuse env a2p_env, download PXB184 models
-#   bash scripts/setup_env.sh --fresh        # delete and recreate the env first (recommended after failed attempts)
+#   bash scripts/setup_env.sh --fresh        # delete and recreate the env first (also removes a stale
+#                                            # ~/.conda/envs/<name> left by earlier attempts)
 #   bash scripts/setup_env.sh --all-models   # models for all 4 subjects
 #   bash scripts/setup_env.sh --datasets     # also download the 4 datasets
 #   bash scripts/setup_env.sh --no-download  # environment only
 #   bash scripts/setup_env.sh --cuda cu118   # force the torch CUDA build (default: auto)
 #   bash scripts/setup_env.sh --env NAME     # use another env name
+#   bash scripts/setup_env.sh --conda PATH   # use this conda executable
+#   bash scripts/setup_env.sh --prefix DIR   # put the env exactly here
+#
+# By default it uses a conda you own that sits in a parent directory of the repo
+# (e.g. /scratch/<you>/anaconda3) and creates the env in <that conda>/envs/<name>,
+# so nothing goes to a read-only system conda or to ~/.conda.
 #
 # Env vars: A2P_CACHE=/big/disk/dir puts pip cache, temp files and downloads there
 #           (default: <repo>/.setup_cache, i.e. next to the repo rather than in $HOME).
@@ -27,6 +36,8 @@ DOWNLOAD=1
 ALL_MODELS=0
 DATASETS=0
 CU=auto
+CONDA_ARG=""
+PREFIX=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -36,7 +47,9 @@ while [ $# -gt 0 ]; do
         --all-models) ALL_MODELS=1 ;;
         --datasets) DATASETS=1 ;;
         --cuda) CU="$2"; shift ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        --conda) CONDA_ARG="$2"; shift ;;
+        --prefix) PREFIX="$2"; shift ;;
+        -h|--help) sed -n '2,/^$/p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1 (see --help)"; exit 1 ;;
     esac
     shift
@@ -47,9 +60,9 @@ cd "$REPO"
 LOG="$REPO/setup_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee "$LOG") 2>&1
 
-step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-warn() { printf '\033[1;33m[WARN] %s\033[0m\n' "$*"; }
-die()  { printf '\033[1;31m[FAIL] %s\033[0m\n' "$*"; exit 1; }
+step() { printf '\n==> %s\n' "$*"; }
+warn() { printf '[WARN] %s\n' "$*"; }
+die()  { printf '[FAIL] %s\n' "$*"; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 ERR_TRAP='die "line $LINENO: \"$BASH_COMMAND\" failed (full log: $LOG)"'
 trap "$ERR_TRAP" ERR
@@ -84,14 +97,47 @@ echo "repo: $REPO   host: $(hostname)   log: $LOG"
 
 # ---------------------------------------------------------------------------
 step "Locating conda"
-CONDA_BIN="${CONDA_EXE:-$(command -v conda || true)}"
-if [ -z "$CONDA_BIN" ] || [ ! -x "$CONDA_BIN" ]; then
+[ -z "$CONDA_ARG" ] || [ -x "$CONDA_ARG" ] || die "--conda $CONDA_ARG is not an executable"
+conda_candidates() {
+    [ -n "$CONDA_ARG" ] && echo "$CONDA_ARG"
+    # a conda installed in a parent directory of the repo, e.g. /scratch/<you>/anaconda3
+    local d="$REPO" up n
+    while [ -n "$d" ] && [ "$d" != / ]; do
+        for n in anaconda3 miniconda3 miniforge3 mambaforge; do echo "$d/$n/bin/conda"; done
+        up="$(dirname "$d")"; [ "$up" = "$d" ] && break; d="$up"
+    done
+    [ -n "${CONDA_EXE:-}" ] && echo "$CONDA_EXE"
+    command -v conda 2>/dev/null || true
+}
+# first one whose base we can write to; a read-only system conda only as a last resort
+CONDA_BIN=""
+FALLBACK_CONDA=""
+while read -r c; do
+    [ -x "$c" ] || continue
+    b="$("$c" info --base 2>/dev/null)" || continue
+    if [ -n "$CONDA_ARG" ] || [ -w "$b" ]; then CONDA_BIN="$c"; break; fi
+    [ -n "$FALLBACK_CONDA" ] || FALLBACK_CONDA="$c"
+done < <(conda_candidates)
+CONDA_BIN="${CONDA_BIN:-$FALLBACK_CONDA}"
+if [ -z "$CONDA_BIN" ]; then
     try_module_load anaconda3 anaconda miniconda3 miniconda miniforge3 conda || true
     CONDA_BIN="${CONDA_EXE:-$(command -v conda || true)}"
 fi
-[ -n "$CONDA_BIN" ] && [ -x "$CONDA_BIN" ] || die "conda not found. Activate your anaconda first (e.g. 'source <anaconda>/bin/activate') and rerun."
+[ -n "$CONDA_BIN" ] && [ -x "$CONDA_BIN" ] || die "conda not found. Pass --conda /path/to/anaconda3/bin/conda"
 CONDA_BASE="$("$CONDA_BIN" info --base)"
 echo "conda: $CONDA_BIN ($("$CONDA_BIN" --version))"
+
+if [ -z "$PREFIX" ]; then
+    if [ -w "$CONDA_BASE" ]; then
+        PREFIX="$CONDA_BASE/envs/$ENV_NAME"
+    else
+        PREFIX="$(dirname "$REPO")/conda_envs/$ENV_NAME"
+    fi
+fi
+# a read-only base would otherwise download packages into ~/.conda/pkgs
+[ -w "$CONDA_BASE" ] || export CONDA_PKGS_DIRS="$CACHE/conda_pkgs"
+case "$PREFIX" in "$HOME"/*) warn "env prefix $PREFIX is inside \$HOME, which may have a small quota" ;; esac
+echo "env prefix: $PREFIX"
 
 # conda's shell functions are not written for set -eu / ERR traps, so relax them while activating
 conda_activate() {
@@ -102,23 +148,27 @@ conda_activate() {
     return $rc
 }
 
-env_exists() { "$CONDA_BIN" env list | awk -v n="$ENV_NAME" '$1 == n { found = 1 } END { exit !found }'; }
+env_exists() { [ -d "$PREFIX/conda-meta" ]; }
 
-step "Conda env '$ENV_NAME'"
-if env_exists && [ "$FRESH" = 1 ]; then
-    echo "--fresh: removing existing env $ENV_NAME"
-    conda_activate base
-    "$CONDA_BIN" remove -y -n "$ENV_NAME" --all
+step "Conda env $PREFIX"
+if [ "$FRESH" = 1 ]; then
+    conda_activate base   # conda refuses to remove the env you are sitting in
+    for p in "$PREFIX" "$HOME/.conda/envs/$ENV_NAME"; do
+        [ -d "$p/conda-meta" ] || continue
+        echo "--fresh: removing $p"
+        "$CONDA_BIN" remove -y -p "$p" --all >/dev/null 2>&1 || true
+        rm -rf "$p"
+    done
 fi
 if ! env_exists; then
     # conda-forge only: avoids the Anaconda 'defaults' ToS prompt in newer conda
-    "$CONDA_BIN" create -y -n "$ENV_NAME" --override-channels -c conda-forge python=3.9
+    "$CONDA_BIN" create -y -p "$PREFIX" --override-channels -c conda-forge python=3.9
 fi
-conda_activate "$ENV_NAME" || die "could not activate $ENV_NAME"
+conda_activate "$PREFIX" || die "could not activate $PREFIX"
 PY="$CONDA_PREFIX/bin/python"
 PYVER="$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-[ "$PYVER" = "3.9" ] || die "env $ENV_NAME has python $PYVER, need 3.9. Rerun with --fresh."
-"$CONDA_BIN" env config vars set -n "$ENV_NAME" PYTHONNOUSERSITE=1 >/dev/null 2>&1 \
+[ "$PYVER" = "3.9" ] || die "env $PREFIX has python $PYVER, need 3.9. Rerun with --fresh."
+"$CONDA_BIN" env config vars set -p "$PREFIX" PYTHONNOUSERSITE=1 >/dev/null 2>&1 \
     || warn "could not persist PYTHONNOUSERSITE=1 in the env; export it yourself if ~/.local has packages"
 echo "python: $PY ($("$PY" --version 2>&1))"
 
@@ -159,6 +209,8 @@ torch==2.0.1
 torchvision==0.15.2
 torchaudio==2.0.2
 numpy==1.23.5
+hydra-core==1.0.7
+omegaconf==2.0.6
 setuptools<70
 EOF
 
@@ -168,10 +220,14 @@ pipi "torch==2.0.1+$CU" "torchvision==0.15.2+$CU" "torchaudio==2.0.2+$CU" \
     --extra-index-url "https://download.pytorch.org/whl/$CU"
 
 step "Installing fairseq 0.12.2 / hydra-core 1.0.7 / omegaconf 2.0.6"
-if ! pipi -c "$CONSTRAINTS" --only-binary=fairseq fairseq==0.12.2 hydra-core==1.0.7 omegaconf==2.0.6; then
-    warn "no fairseq wheel for this platform, building it from source"
-    pipi -c "$CONSTRAINTS" cython
-    pipi -c "$CONSTRAINTS" --no-build-isolation fairseq==0.12.2 hydra-core==1.0.7 omegaconf==2.0.6
+pipi -c "$CONSTRAINTS" cython hydra-core==1.0.7 omegaconf==2.0.6
+if "$PY" -c 'import sys, fairseq; sys.exit(fairseq.__version__ != "0.12.2")' >/dev/null 2>&1; then
+    echo "fairseq 0.12.2 already installed"
+else
+    # no Linux wheel on PyPI and the PyPI sdist lacks clib/libbase, so build the tagged GitHub source
+    # (CPU extensions only; takes a few minutes, longer with a single CPU)
+    pipi -c "$CONSTRAINTS" --no-build-isolation \
+        "fairseq @ https://github.com/facebookresearch/fairseq/archive/refs/tags/v0.12.2.tar.gz"
 fi
 
 step "Installing the remaining Python packages"
@@ -204,7 +260,7 @@ build_pytorch3d_from_source() {
     fi
     if [ -z "$nvcc_bin" ]; then
         echo "no CUDA 11 nvcc on this machine, installing CUDA $CUDA_VER toolkit into the env"
-        "$CONDA_BIN" install -y -n "$ENV_NAME" --override-channels \
+        "$CONDA_BIN" install -y -p "$PREFIX" --override-channels \
             -c "nvidia/label/cuda-$CUDA_VER.0" -c conda-forge cuda-toolkit
         [ -e "$CONDA_PREFIX/lib64" ] || ln -s lib "$CONDA_PREFIX/lib64"
         nvcc_bin="$CONDA_PREFIX/bin/nvcc"
@@ -221,7 +277,7 @@ build_pytorch3d_from_source() {
     fi
     if [ "${gcc_major:-0}" -lt 7 ] || [ "$gcc_major" -gt 11 ]; then
         echo "system gcc ($gcc_major) unsuitable, installing gcc 11 into the env"
-        "$CONDA_BIN" install -y -n "$ENV_NAME" --override-channels -c conda-forge gcc_linux-64=11 gxx_linux-64=11
+        "$CONDA_BIN" install -y -p "$PREFIX" --override-channels -c conda-forge gcc_linux-64=11 gxx_linux-64=11
         export CC="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-gcc" CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++"
     else
         export CC="$(command -v gcc)" CXX="$(command -v g++)"
@@ -397,9 +453,10 @@ RC=$?
 step "Summary"
 if [ $RC -eq 0 ]; then
     cat <<EOF
-Environment '$ENV_NAME' is ready.
+Environment $PREFIX is ready.
 
-  conda activate $ENV_NAME
+  source $CONDA_BASE/etc/profile.d/conda.sh
+  conda activate $PREFIX
   cd $REPO
 
   # face codes, then body + render (PXB184)
