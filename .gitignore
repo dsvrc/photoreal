@@ -1,7 +1,9 @@
 *.pyc
 *.pt
+# ignore the downloaded data but keep the per-subject normalization stats shipped with the repo
+dataset/*/*
 !dataset/*/data_stats.pth
-dataset
 .setup_cache/
 setup_*.log
 server_info_*.log
+cl_data/

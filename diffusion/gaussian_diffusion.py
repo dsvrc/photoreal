@@ -1244,15 +1244,17 @@ class GaussianDiffusion:
 
         terms["loss"] = terms["rot_mse"] + (self.lambda_vel * terms.get("vel_mse", 0.0))
 
-        with torch.no_grad():
-            terms["vb"] = self._vb_terms_bpd(
-                model,
-                x_start,
-                x_t,
-                t,
-                clip_denoised=False,
-                model_kwargs=model_kwargs,
-            )["output"]
+        # the vb term is only logged, and costs a second forward pass; trainers may turn it off
+        if getattr(self, "compute_vb", True):
+            with torch.no_grad():
+                terms["vb"] = self._vb_terms_bpd(
+                    model,
+                    x_start,
+                    x_t,
+                    t,
+                    clip_denoised=False,
+                    model_kwargs=model_kwargs,
+                )["output"]
 
         return terms
 

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Batch job for one continual session; pass the cl.train_session arguments in ARGS:
+#   qsub -v ARGS="--init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/vanilla/s1_RLW104 --steps 60000 --resume" scripts/cl/run_session.pbs
+# Submit from the repo root. --resume makes a resubmitted job continue where the last one stopped.
+# Add your project flag if the cluster requires one, e.g. #PBS -P <project>.
+#PBS -N a2p_cl
+#PBS -q standard
+#PBS -l select=1:ncpus=8:ngpus=1
+#PBS -l walltime=48:00:00
+#PBS -j oe
+
+cd "$PBS_O_WORKDIR"
+source "${A2P_CONDA_SH:-/scratch/ee/staff/kaizer1.cstaff/anaconda3/etc/profile.d/conda.sh}"
+conda activate "${A2P_ENV:-/scratch/ee/staff/kaizer1.cstaff/anaconda3/envs/a2p_env}"
+export PYTHONNOUSERSITE=1
+nvidia-smi -L
+python -m cl.train_session $ARGS
