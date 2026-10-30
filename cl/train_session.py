@@ -32,7 +32,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from cl.common import build_model, load_ckpt_args, subject_of
 from cl.replay import ReplayWindows, read_buffers, replay_collate
-from data_loaders.data import Social
+from cl.session_data import PreNormalizedSocial
 from data_loaders.get_data import load_local_data
 from data_loaders.tensors import social_collate
 from diffusion.resample import create_named_schedule_sampler
@@ -132,12 +132,14 @@ def main():
     with open(os.path.join(cl_args.save_dir, "args.json"), "w") as f:
         json.dump(saved, f, indent=4, sort_keys=True)
 
-    # new-session data: the repo's own Social dataset (random 400-600 frame crops, own stats)
+    # new-session data: the repo's Social crops (random 400-600 frames, own stats), normalized once
     datasets = []
     for root in cl_args.data_root:
         sub_args = copy.copy(args)
         sub_args.data_root = root
-        datasets.append(Social(args=sub_args, data_dict=load_local_data(root, audio_per_frame=1600), split="train"))
+        datasets.append(
+            PreNormalizedSocial(args=sub_args, data_dict=load_local_data(root, audio_per_frame=1600), split="train")
+        )
     new_data = ConcatDataset(datasets) if len(datasets) > 1 else datasets[0]
     new_iter = cycle(
         DataLoader(
@@ -197,14 +199,16 @@ def main():
         torch.save(model.state_dict(), os.path.join(cl_args.save_dir, f"model{step:09d}.pt"))
         torch.save(opt.state_dict(), os.path.join(cl_args.save_dir, f"opt{step:09d}.pt"))
 
-    t0, running = time.time(), {"new": 0.0, "replay": 0.0, "n": 0}
+    t0, running = time.time(), {"new": 0.0, "replay": 0.0, "n": 0, "data": 0.0}
     for step in range(start_step, cl_args.steps):
+        t_data = time.time()
         motion, cond = next(new_iter)
         n_new = motion.shape[0]
         weights = None
         if replay_iter is not None:
             r_motion, r_cond, weights = next(replay_iter)
             motion, cond = concat_batches((motion, cond), (r_motion, r_cond))
+        running["data"] += time.time() - t_data
         motion = motion.to(device)
         cond = to_device(cond, device)
 
@@ -225,15 +229,18 @@ def main():
         running["n"] += 1
         done = step + 1
         if done % cl_args.log_every == 0:
-            rate = running["n"] / (time.time() - t0)
+            elapsed = time.time() - t0
+            rate = running["n"] / elapsed
+            data_pct = 100 * running["data"] / elapsed
             msg = f"step {done}/{cl_args.steps} | loss new {running['new'] / running['n']:.5f}"
             writer.add_scalar("loss/new", running["new"] / running["n"], done)
             if replay_iter is not None:
                 msg += f" replay {running['replay'] / running['n']:.5f}"
                 writer.add_scalar("loss/replay", running["replay"] / running["n"], done)
             eta_h = (cl_args.steps - done) / max(rate, 1e-9) / 3600
-            print(f"{msg} | {rate:.2f} it/s | eta {eta_h:.1f} h", flush=True)
-            t0, running = time.time(), {"new": 0.0, "replay": 0.0, "n": 0}
+            # "waiting for data" near 0% means the GPU is the limit; high means the loader is
+            print(f"{msg} | {rate:.2f} it/s | waiting for data {data_pct:.0f}% | eta {eta_h:.1f} h", flush=True)
+            t0, running = time.time(), {"new": 0.0, "replay": 0.0, "n": 0, "data": 0.0}
         if done % cl_args.save_every == 0 or done == cl_args.steps:
             save(done)
 
