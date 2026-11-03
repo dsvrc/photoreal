@@ -5,6 +5,8 @@ Starts from the previous session's checkpoint, trains on the new subject(s) for 
 --steps steps with a fresh AdamW, and optionally replays weighted windows from earlier
 subjects: every step adds one replay batch (as large as the training batch by default) drawn
 from the shuffled union of the buffers, loss = mean(new) + lambda * mean(w * replay).
+The two batches go through the model one after the other, each with its own backward pass,
+before one optimizer step: the gradient of that loss with the memory of one batch.
 Every subject keeps its own data_stats.pth normalization, as in the original loader.
 
 Session 1, no replay (vanilla), from the released PXB184 body model:
@@ -84,13 +86,6 @@ def seed_worker(worker_id):
 def to_device(cond, device):
     cond["y"] = {k: v.to(device) if torch.is_tensor(v) else v for k, v in cond["y"].items()}
     return cond
-
-
-def concat_batches(a, b):
-    """New-data batch + replay batch; replay tensors take the new batch's dtypes."""
-    motion = torch.cat([a[0], b[0].to(a[0].dtype)], dim=0)
-    y = {k: torch.cat([a[1]["y"][k], b[1]["y"][k].to(a[1]["y"][k].dtype)], dim=0) for k in a[1]["y"]}
-    return motion, {"y": y}
 
 
 def latest_checkpoint(save_dir):
@@ -213,42 +208,39 @@ def main():
         torch.save(model.state_dict(), os.path.join(cl_args.save_dir, f"model{step:09d}.pt"))
         torch.save(opt.state_dict(), os.path.join(cl_args.save_dir, f"opt{step:09d}.pt"))
 
+    def losses(motion, cond):
+        t, _ = sampler.sample(motion.shape[0], device)
+        return diffusion.training_losses(model, motion, t, model_kwargs=cond)["loss"]
+
     t0, running = time.time(), {"new": 0.0, "replay": 0.0, "star": 0.0, "n": 0, "data": 0.0}
     for step in range(start_step, cl_args.steps):
         t_data = time.time()
         motion, cond = next(new_iter)
-        n_new = motion.shape[0]
-        weights = None
-        if replay_iter is not None:
-            r_motion, r_cond, weights = next(replay_iter)
-            motion, cond = concat_batches((motion, cond), (r_motion, r_cond))
+        replay = next(replay_iter) if replay_iter is not None else None
         running["data"] += time.time() - t_data
-        motion = motion.to(device)
-        cond = to_device(cond, device)
 
-        t, _ = sampler.sample(motion.shape[0], device)
-        if star is None:
-            per_sample = diffusion.training_losses(model, motion, t, model_kwargs=cond)["loss"]
-        else:
-            # STAR runs three more forwards on the replay clips: encode their audio (frozen wav2vec) once
-            with torch.no_grad():
-                cond["y"]["audio"] = model.encode_audio(cond["y"]["audio"])
-            with patched(model, "encode_audio", lambda emb: emb):
-                per_sample = diffusion.training_losses(model, motion, t, model_kwargs=cond)["loss"]
-                replay_cond = {"y": {k: v[n_new:] for k, v in cond["y"].items()}}
-                loss_star = star.loss(diffusion, motion[n_new:], replay_cond, seed=cl_args.seed * 1_000_003 + step)
-        loss_new = per_sample[:n_new].mean()
-        loss = loss_new
-        if weights is not None:
-            loss_replay = (weights.to(device) * per_sample[n_new:]).mean()
-            loss = loss + cl_args.replay_lambda * loss_replay
-            running["replay"] += loss_replay.item()
-        if star is not None:
-            loss = loss + loss_star
-            running["star"] += loss_star.item()
-
+        # loss = mean(new) + lambda * mean(w * replay) [+ STAR], one backward per batch: the gradients
+        # add up to the gradient of the sum, and only one batch's activations are in memory at a time
         opt.zero_grad(set_to_none=True)
-        loss.backward()
+        loss_new = losses(motion.to(device), to_device(cond, device)).mean()
+        loss_new.backward()
+        if replay is not None:
+            r_motion, r_cond, weights = replay
+            r_motion, r_cond, weights = r_motion.to(device), to_device(r_cond, device), weights.to(device)
+            if star is None:
+                loss_replay = (weights * losses(r_motion, r_cond)).mean()
+                (cl_args.replay_lambda * loss_replay).backward()
+            else:
+                # STAR runs three more forwards on the replay clips: encode their audio (frozen wav2vec) once
+                with torch.no_grad():
+                    r_cond["y"]["audio"] = model.encode_audio(r_cond["y"]["audio"])
+                with patched(model, "encode_audio", lambda emb: emb):
+                    loss_replay = (weights * losses(r_motion, r_cond)).mean()
+                    (cl_args.replay_lambda * loss_replay).backward()
+                    loss_star = star.loss(diffusion, r_motion, r_cond, seed=cl_args.seed * 1_000_003 + step)
+                    loss_star.backward()
+                running["star"] += loss_star.item()
+            running["replay"] += loss_replay.item()
         opt.step()
 
         running["new"] += loss_new.item()
