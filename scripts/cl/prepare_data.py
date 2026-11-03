@@ -8,17 +8,22 @@ exactly what the training code sees.
 
     python scripts/cl/prepare_data.py --data_root dataset --out cl_data
 
-Writes <out>/manifest.json with, per subject: scene splits, scene lengths, fixed
-training windows (the replay-candidate pool), and the val/test chunks used for evaluation.
+Writes <out>/manifest.json with, per subject: scene splits, scene lengths, the replay
+candidates (600-frame windows tiling the training scenes, cl/clips.py), and the val/test
+chunks used for evaluation.
 """
 
 import argparse
 import json
 import os
+import sys
 
 import numpy as np
 import torch
 import torchaudio
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from cl.clips import replay_budget, tile_starts  # noqa: E402
 
 FPS = 30
 AUDIO_PER_FRAME = 1600  # 48 kHz audio / 30 fps motion
@@ -55,11 +60,7 @@ def chunk_starts(length, window):
     return list(range(0, length - window, window))
 
 
-def window_starts(length, window, stride):
-    return list(range(0, length - window + 1, stride))
-
-
-def inspect_subject(person, root, window, stride):
+def inspect_subject(person, root, window):
     person_dir = os.path.join(root, person)
     if not os.path.isdir(person_dir) or not any(
         f.endswith("_body_pose.npy") for f in os.listdir(person_dir)
@@ -99,15 +100,16 @@ def inspect_subject(person, root, window, stride):
         "scenes": split,
         "frames": frames,
         "hours": {k: round(hours(v), 3) for k, v in split.items()},
-        "train_windows": [[s, st] for s in split["train"] for st in window_starts(frames[s], window, stride)],
+        "train_clips": [[s, st] for s in split["train"] for st in tile_starts(frames[s], window)],
         "val_chunks": [[s, st] for s in split["val"] for st in chunk_starts(frames[s], window)],
         "test_chunks": [[s, st] for s in split["test"] for st in chunk_starts(frames[s], window)],
         "problems": problems,
     }
+    n_clips = len(entry["train_clips"])
     print(
         f"  scenes train/val/test = {len(split['train'])}/{len(split['val'])}/{len(split['test'])}"
         f" | hours {entry['hours']}"
-        f" | train windows {len(entry['train_windows'])} (10% replay = {len(entry['train_windows']) // 10})"
+        f" | replay candidates {n_clips} (10% buffer = {replay_budget(n_clips, 0.10)})"
         f" | val chunks {len(entry['val_chunks'])} | test chunks {len(entry['test_chunks'])}"
     )
     for p in problems:
@@ -186,13 +188,12 @@ def main():
     parser.add_argument("--out", default="cl_data")
     parser.add_argument("--order", default="PXB184,RLW104,TXB805,GQS883", help="session order")
     parser.add_argument("--window", type=int, default=600, help="frames per replay candidate / eval chunk")
-    parser.add_argument("--stride", type=int, default=300, help="stride between replay-candidate windows")
     args = parser.parse_args()
 
     order = args.order.split(",")
     manifest = {}
     for person in order:
-        entry = inspect_subject(person, args.data_root, args.window, args.stride)
+        entry = inspect_subject(person, args.data_root, args.window)
         if entry is not None:
             manifest[person] = entry
     missing = [p for p in order if p not in manifest]
@@ -203,7 +204,6 @@ def main():
     out = {
         "order": order,
         "window": args.window,
-        "stride": args.stride,
         "fps": FPS,
         "subjects": manifest,
     }

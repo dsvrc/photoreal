@@ -3,15 +3,18 @@ One continual-learning session for the body (pose) diffusion model.
 
 Starts from the previous session's checkpoint, trains on the new subject(s) for exactly
 --steps steps with a fresh AdamW, and optionally replays weighted windows from earlier
-subjects (loss = mean(new) + lambda * mean(w * replay), i.e. Eq. 7 with weights of mean 1).
+subjects: every step adds one replay batch (as large as the training batch by default) drawn
+from the shuffled union of the buffers, loss = mean(new) + lambda * mean(w * replay).
 Every subject keeps its own data_stats.pth normalization, as in the original loader.
 
 Session 1, no replay (vanilla), from the released PXB184 body model:
     python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt \
         --data_root dataset/RLW104 --save_dir runs/vanilla/s1_RLW104 --steps 60000
 
-Same session with replay of an earlier buffer:
+Same session with replay of an earlier buffer (cl.build_buffer):
     ... --replay cl_data/buffers/er/s0_PXB184.json
+Random* (STAR on the replay batch):
+    ... --replay cl_data/buffers/star/s0_PXB184.json --star
 Joint upper bound (all subjects at once):
     ... --data_root dataset/PXB184 dataset/RLW104 dataset/TXB805 dataset/GQS883
 """
@@ -27,12 +30,13 @@ import time
 import numpy as np
 import torch
 from torch.optim import AdamW
-from torch.utils.data import ConcatDataset, DataLoader, RandomSampler
+from torch.utils.data import ConcatDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from cl.common import build_model, load_ckpt_args, subject_of
-from cl.replay import ReplayWindows, read_buffers, replay_collate
+from cl.common import build_model, load_ckpt_args, patched, subject_of
+from cl.replay import ReplayWindows, ShuffledStream, read_buffers, replay_collate
 from cl.session_data import PreNormalizedSocial
+from cl.star import STAR
 from data_loaders.get_data import load_local_data
 from data_loaders.tensors import social_collate
 from diffusion.resample import create_named_schedule_sampler
@@ -50,8 +54,12 @@ def parse_args():
     p.add_argument("--batch_size", type=int, default=None, help="new-data batch (default: from init args.json)")
     p.add_argument("--lr", type=float, default=None, help="default: from init args.json")
     p.add_argument("--replay", nargs="*", default=[], help="buffer JSON files of earlier sessions")
-    p.add_argument("--replay_batch", type=int, default=8)
+    p.add_argument("--replay_batch", type=int, default=None, help="default: the training batch size")
     p.add_argument("--replay_lambda", type=float, default=1.0)
+    p.add_argument("--star", action="store_true", help="add the STAR loss on every replay batch (Random*)")
+    p.add_argument("--star_lambda", type=float, default=0.1)
+    p.add_argument("--star_gamma", type=float, default=0.01)
+    p.add_argument("--star_eps", type=float, default=0.001)
     p.add_argument("--dataset_root", default="dataset", help="where replay subjects live")
     p.add_argument("--num_workers", type=int, default=None, help="default: min(8, CPUs of this job)")
     p.add_argument("--seed", type=int, default=10)
@@ -115,6 +123,8 @@ def main():
     args.data_root = cl_args.data_root[0]
     args.batch_size = cl_args.batch_size or args.batch_size
     args.lr = cl_args.lr or args.lr
+    replay_batch = cl_args.replay_batch or args.batch_size
+    assert not cl_args.star or cl_args.replay, "--star acts on the replay batch; pass --replay buffers"
     num_workers = cl_args.num_workers
     if num_workers is None:
         num_workers = min(8, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count())
@@ -125,8 +135,11 @@ def main():
         "data_roots": cl_args.data_root,
         "steps": cl_args.steps,
         "replay": cl_args.replay,
-        "replay_batch": cl_args.replay_batch,
+        "replay_batch": replay_batch,
         "replay_lambda": cl_args.replay_lambda,
+        "star": {"lambda": cl_args.star_lambda, "gamma": cl_args.star_gamma, "eps": cl_args.star_eps}
+        if cl_args.star
+        else None,
         "seed": cl_args.seed,
     }
     with open(os.path.join(cl_args.save_dir, "args.json"), "w") as f:
@@ -158,15 +171,15 @@ def main():
     replay_iter = None
     if cl_args.replay:
         entries = read_buffers(cl_args.replay)
-        replay_data = ReplayWindows(entries, cl_args.dataset_root, window=args.max_seq_length)
+        replay_data = ReplayWindows(entries, cl_args.dataset_root, window=args.max_seq_length, preload=True)
         mean_w = np.mean([e.get("weight", 1.0) for e in entries])
         print(f"replay: {len(entries)} windows from {cl_args.replay} (mean weight {mean_w:.3f})")
         replay_iter = iter(
             DataLoader(
                 replay_data,
-                batch_size=cl_args.replay_batch,
-                sampler=RandomSampler(
-                    replay_data, replacement=True, num_samples=(cl_args.steps - start_step + 1) * cl_args.replay_batch
+                batch_size=replay_batch,
+                sampler=ShuffledStream(
+                    len(replay_data), (cl_args.steps - start_step + 1) * replay_batch, seed=cl_args.seed + start_step
                 ),
                 num_workers=max(1, num_workers // 4) if num_workers > 0 else 0,
                 drop_last=True,
@@ -186,10 +199,11 @@ def main():
         if os.path.exists(opt_path):
             opt.load_state_dict(torch.load(opt_path, map_location=device))
         print(f"resuming from {start_ckpt} at step {start_step}")
+    star = STAR(model, cl_args.star_lambda, cl_args.star_gamma, cl_args.star_eps) if cl_args.star else None
     n_params = sum(p.numel() for p in model.parameters_w_grad()) / 1e6
     print(
         f"trainable params {n_params:.2f}M | subjects {[subject_of(r) for r in cl_args.data_root]}"
-        f" | batch {args.batch_size} (+{cl_args.replay_batch if replay_iter else 0} replay)"
+        f" | batch {args.batch_size} (+{replay_batch if replay_iter else 0} replay{' with STAR' if star else ''})"
         f" | lr {args.lr} | workers {num_workers} | steps {start_step}->{cl_args.steps}"
     )
 
@@ -199,7 +213,7 @@ def main():
         torch.save(model.state_dict(), os.path.join(cl_args.save_dir, f"model{step:09d}.pt"))
         torch.save(opt.state_dict(), os.path.join(cl_args.save_dir, f"opt{step:09d}.pt"))
 
-    t0, running = time.time(), {"new": 0.0, "replay": 0.0, "n": 0, "data": 0.0}
+    t0, running = time.time(), {"new": 0.0, "replay": 0.0, "star": 0.0, "n": 0, "data": 0.0}
     for step in range(start_step, cl_args.steps):
         t_data = time.time()
         motion, cond = next(new_iter)
@@ -213,13 +227,25 @@ def main():
         cond = to_device(cond, device)
 
         t, _ = sampler.sample(motion.shape[0], device)
-        per_sample = diffusion.training_losses(model, motion, t, model_kwargs=cond)["loss"]
+        if star is None:
+            per_sample = diffusion.training_losses(model, motion, t, model_kwargs=cond)["loss"]
+        else:
+            # STAR runs three more forwards on the replay clips: encode their audio (frozen wav2vec) once
+            with torch.no_grad():
+                cond["y"]["audio"] = model.encode_audio(cond["y"]["audio"])
+            with patched(model, "encode_audio", lambda emb: emb):
+                per_sample = diffusion.training_losses(model, motion, t, model_kwargs=cond)["loss"]
+                replay_cond = {"y": {k: v[n_new:] for k, v in cond["y"].items()}}
+                loss_star = star.loss(diffusion, motion[n_new:], replay_cond, seed=cl_args.seed * 1_000_003 + step)
         loss_new = per_sample[:n_new].mean()
         loss = loss_new
         if weights is not None:
             loss_replay = (weights.to(device) * per_sample[n_new:]).mean()
             loss = loss + cl_args.replay_lambda * loss_replay
             running["replay"] += loss_replay.item()
+        if star is not None:
+            loss = loss + loss_star
+            running["star"] += loss_star.item()
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -237,10 +263,13 @@ def main():
             if replay_iter is not None:
                 msg += f" replay {running['replay'] / running['n']:.5f}"
                 writer.add_scalar("loss/replay", running["replay"] / running["n"], done)
+            if star is not None:
+                msg += f" star {running['star'] / running['n']:.2e}"
+                writer.add_scalar("loss/star", running["star"] / running["n"], done)
             eta_h = (cl_args.steps - done) / max(rate, 1e-9) / 3600
             # "waiting for data" near 0% means the GPU is the limit; high means the loader is
             print(f"{msg} | {rate:.2f} it/s | waiting for data {data_pct:.0f}% | eta {eta_h:.1f} h", flush=True)
-            t0, running = time.time(), {"new": 0.0, "replay": 0.0, "n": 0, "data": 0.0}
+            t0, running = time.time(), {"new": 0.0, "replay": 0.0, "star": 0.0, "n": 0, "data": 0.0}
         if done % cl_args.save_every == 0 or done == cl_args.steps:
             save(done)
 

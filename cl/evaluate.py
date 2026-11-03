@@ -28,7 +28,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from cl.common import build_model, load_ckpt_args, load_stats
+from cl.common import build_model, load_ckpt_args, load_stats, patched
 from cl.replay import ReplayWindows, replay_collate
 from model.cfg_sampler import ClassifierFreeSampleModel
 from utils.eval import calculate_activation_statistics, calculate_frechet_distance
@@ -54,16 +54,6 @@ def parse_args():
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--device", default="cuda")
     return p.parse_args()
-
-
-@contextlib.contextmanager
-def patched(obj, name, value):
-    """Temporarily shadow a method on one module instance."""
-    setattr(obj, name, value)
-    try:
-        yield
-    finally:
-        delattr(obj, name)
 
 
 def frechet(a: np.ndarray, b: np.ndarray) -> float:
@@ -99,7 +89,7 @@ def evaluate_one(base, cfg, diffusion, subject, chunks, mode, a, stats):
         ReplayWindows(entries, a.dataset_root, window=base.seq_len),
         batch_size=a.batch,
         shuffle=False,
-        num_workers=min(4, os.cpu_count() or 1),
+        num_workers=min(4, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()),
         collate_fn=replay_collate,
     )
     gen = torch.Generator(device=a.device).manual_seed(a.seed)

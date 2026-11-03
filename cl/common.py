@@ -1,6 +1,7 @@
-"""Shared helpers: checkpoint args, model loading, per-subject stats and fixed windows."""
+"""Shared helpers: checkpoint args, model loading, per-subject stats, fixed windows, RNG/patch contexts."""
 
 import argparse
+import contextlib
 import json
 import os
 
@@ -12,6 +13,30 @@ from utils.model_util import create_model_and_diffusion, load_model
 
 AUDIO_PER_FRAME = 1600  # 48 kHz audio / 30 fps motion
 WRAP_SUBJECTS = ("PXB184", "RLW104")  # get_data.py fixes a wrap-around in pose dim 3 for these
+
+
+@contextlib.contextmanager
+def patched(obj, name, value):
+    """Temporarily shadow a method on one module instance."""
+    setattr(obj, name, value)
+    try:
+        yield
+    finally:
+        delattr(obj, name)
+
+
+@contextlib.contextmanager
+def fixed_rng(seed: int):
+    """Seed torch for what runs inside (time steps, noise, condition dropout, dropout); restore it after."""
+    cpu = torch.get_rng_state()
+    cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+    torch.manual_seed(seed)
+    try:
+        yield
+    finally:
+        torch.set_rng_state(cpu)
+        if cuda is not None:
+            torch.cuda.set_rng_state_all(cuda)
 
 
 def load_ckpt_args(ckpt_path: str) -> argparse.Namespace:

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Batch job for one method (scripts/cl/run_method.sh); submit from the repo root:
+#   qsub -N tmr_joint -v METHOD=tmr_joint scripts/cl/run_method.pbs
+# Three sessions take longer than one walltime: resubmit, or queue a follow-up that starts when this
+# one ends (each job continues where the previous one stopped):
+#   J=$(qsub -N tmr_joint -v METHOD=tmr_joint scripts/cl/run_method.pbs)
+#   qsub -N tmr_joint -W depend=afterany:$J -v METHOD=tmr_joint scripts/cl/run_method.pbs
+# Add your project flag if the cluster requires one, e.g. #PBS -P <project>.
+#PBS -N a2p_method
+#PBS -q standard
+#PBS -l select=1:ncpus=8:ngpus=1
+#PBS -l walltime=48:00:00
+#PBS -j oe
+
+cd "$PBS_O_WORKDIR"
+source "${A2P_CONDA_SH:-/scratch/ee/staff/kaizer1.cstaff/anaconda3/etc/profile.d/conda.sh}"
+conda activate "${A2P_ENV:-/scratch/ee/staff/kaizer1.cstaff/anaconda3/envs/a2p_env}"
+export PYTHONNOUSERSITE=1
+nvidia-smi -L
+bash scripts/cl/run_method.sh "$METHOD"
