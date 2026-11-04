@@ -101,3 +101,24 @@ def replay_collate(batch):
     motion, cond = social_collate(batch)
     weights = torch.tensor([b["weight"] for b in batch], dtype=torch.float32)
     return motion, cond, weights
+
+
+class ReplayBatches:
+    """The batches of DataLoader(windows, batch_size, sampler=ShuffledStream(len(windows), num_samples,
+    seed), drop_last=True, collate_fn=replay_collate), served from the whole buffer kept on `device`
+    (a few hundred MB): the same batches in the same order, without loader workers."""
+
+    def __init__(self, windows: ReplayWindows, batch_size: int, num_samples: int, seed: int, device):
+        motion, cond, weights = replay_collate([windows[i] for i in range(len(windows))])
+        self.motion, self.weights = motion.to(device), weights.to(device)
+        self.y = {k: v.to(device) for k, v in cond["y"].items()}
+        self.order = iter(ShuffledStream(len(windows), num_samples, seed))
+        self.batch_size, self.device = batch_size, device
+        self.nbytes = sum(t.numel() * t.element_size() for t in [self.motion, self.weights, *self.y.values()])
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        idx = torch.tensor([next(self.order) for _ in range(self.batch_size)], device=self.device)
+        return self.motion[idx], {"y": {k: v[idx] for k, v in self.y.items()}}, self.weights[idx]
