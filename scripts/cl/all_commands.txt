@@ -1,0 +1,199 @@
+CONTINUAL-LEARNING COMMANDS, BODY MODEL
+PXB184 (step 0, the released model) -> RLW104 (step 1) -> TXB805 (step 2) -> GQS883 (step 3)
+Baselines: vanilla er star ocs gcr mir csrel tmr tmr_joint
+
+Run from the repo root in a2p_env:
+cd /scratch/ee/staff/kaizer1.cstaff/3d_new/photoreal
+
+How to use this file:
+- Each baseline runs its steps in order: step 2 needs that baseline's step 1 model.
+  Different baselines do not depend on each other, so each can have its own GPU.
+- "buffer" line: run it once, after that baseline's previous step has finished. If the
+  buffer file already exists, skip it: a buffer must stay the same in the later steps.
+- "train + test" line: if training stops, run this same line again. It continues from the
+  latest checkpoint. Do not run the buffer line again for that.
+- Replay: every step trains on 32 current + 32 replay windows, with equal weight in the
+  loss. The buffers are 10% of each subject's clips and are mixed into one shuffled list.
+
+==============================================================================
+STEP 1: train on RLW104, replay PXB184, test on PXB184 RLW104
+==============================================================================
+
+--- vanilla (no replay, no buffer) ---
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/vanilla/s1_RLW104 --steps 60000 --save_every 10000 --resume && python -m cl.evaluate --ckpt runs/vanilla/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- er (random buffers) ---
+buffer of PXB184:
+python -m cl.build_buffer --method random --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/er/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/er/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/er/s0_PXB184.json && python -m cl.evaluate --ckpt runs/er/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- star (random buffers + STAR) ---
+buffer of PXB184:
+python -m cl.build_buffer --method random --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/star/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/star/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/star/s0_PXB184.json --star && python -m cl.evaluate --ckpt runs/star/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- ocs ---
+buffer of PXB184:
+python -m cl.build_buffer --method ocs --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/ocs/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/ocs/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/ocs/s0_PXB184.json && python -m cl.evaluate --ckpt runs/ocs/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- gcr ---
+buffer of PXB184:
+python -m cl.build_buffer --method gcr --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/gcr/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/gcr/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/gcr/s0_PXB184.json && python -m cl.evaluate --ckpt runs/gcr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- mir ---
+buffer of PXB184:
+python -m cl.build_buffer --method mir --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/mir/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/mir/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/mir/s0_PXB184.json && python -m cl.evaluate --ckpt runs/mir/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- csrel ---
+buffer of PXB184:
+python -m cl.build_buffer --method csrel --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/csrel/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/csrel/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/csrel/s0_PXB184.json && python -m cl.evaluate --ckpt runs/csrel/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- tmr (paper version) ---
+buffer of PXB184:
+python -m cl.build_buffer --method tmr --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/tmr/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/tmr/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/tmr/s0_PXB184.json && python -m cl.evaluate --ckpt runs/tmr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- tmr_joint ---
+buffer of PXB184:
+python -m cl.build_buffer --method tmr_joint --subject PXB184 --session 0 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers/tmr_joint/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs/tmr_joint/s1_RLW104 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/tmr_joint/s0_PXB184.json && python -m cl.evaluate --ckpt runs/tmr_joint/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+==============================================================================
+STEP 2: train on TXB805, replay PXB184 + RLW104, test on PXB184 RLW104 TXB805
+==============================================================================
+
+--- vanilla (no replay, no buffer) ---
+train + test:
+python -m cl.train_session --init_ckpt runs/vanilla/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/vanilla/s2_TXB805 --steps 60000 --save_every 10000 --resume && python -m cl.evaluate --ckpt runs/vanilla/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- er (random buffers) ---
+buffer of RLW104:
+python -m cl.build_buffer --method random --subject RLW104 --session 1 --ckpt runs/er/s1_RLW104/model000060000.pt --out cl_data/buffers/er/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/er/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/er/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/er/s0_PXB184.json cl_data/buffers/er/s1_RLW104.json && python -m cl.evaluate --ckpt runs/er/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- star (random buffers + STAR) ---
+buffer of RLW104:
+python -m cl.build_buffer --method random --subject RLW104 --session 1 --ckpt runs/star/s1_RLW104/model000060000.pt --out cl_data/buffers/star/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/star/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/star/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/star/s0_PXB184.json cl_data/buffers/star/s1_RLW104.json --star && python -m cl.evaluate --ckpt runs/star/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- ocs ---
+buffer of RLW104:
+python -m cl.build_buffer --method ocs --subject RLW104 --session 1 --ckpt runs/ocs/s1_RLW104/model000060000.pt --out cl_data/buffers/ocs/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/ocs/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/ocs/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/ocs/s0_PXB184.json cl_data/buffers/ocs/s1_RLW104.json && python -m cl.evaluate --ckpt runs/ocs/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- gcr ---
+buffer of RLW104:
+python -m cl.build_buffer --method gcr --subject RLW104 --session 1 --ckpt runs/gcr/s1_RLW104/model000060000.pt --out cl_data/buffers/gcr/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/gcr/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/gcr/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/gcr/s0_PXB184.json cl_data/buffers/gcr/s1_RLW104.json && python -m cl.evaluate --ckpt runs/gcr/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- mir ---
+buffer of RLW104:
+python -m cl.build_buffer --method mir --subject RLW104 --session 1 --ckpt runs/mir/s1_RLW104/model000060000.pt --out cl_data/buffers/mir/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/mir/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/mir/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/mir/s0_PXB184.json cl_data/buffers/mir/s1_RLW104.json && python -m cl.evaluate --ckpt runs/mir/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- csrel ---
+buffer of RLW104:
+python -m cl.build_buffer --method csrel --subject RLW104 --session 1 --ckpt runs/csrel/s1_RLW104/model000060000.pt --out cl_data/buffers/csrel/s1_RLW104.json --prev_ckpt checkpoints/diffusion/c1_pose/model000340000.pt
+train + test:
+python -m cl.train_session --init_ckpt runs/csrel/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/csrel/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/csrel/s0_PXB184.json cl_data/buffers/csrel/s1_RLW104.json && python -m cl.evaluate --ckpt runs/csrel/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- tmr (paper version) ---
+buffer of RLW104:
+python -m cl.build_buffer --method tmr --subject RLW104 --session 1 --ckpt runs/tmr/s1_RLW104/model000060000.pt --out cl_data/buffers/tmr/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/tmr/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/tmr/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/tmr/s0_PXB184.json cl_data/buffers/tmr/s1_RLW104.json && python -m cl.evaluate --ckpt runs/tmr/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+--- tmr_joint ---
+buffer of RLW104:
+python -m cl.build_buffer --method tmr_joint --subject RLW104 --session 1 --ckpt runs/tmr_joint/s1_RLW104/model000060000.pt --out cl_data/buffers/tmr_joint/s1_RLW104.json
+train + test:
+python -m cl.train_session --init_ckpt runs/tmr_joint/s1_RLW104/model000060000.pt --data_root dataset/TXB805 --save_dir runs/tmr_joint/s2_TXB805 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/tmr_joint/s0_PXB184.json cl_data/buffers/tmr_joint/s1_RLW104.json && python -m cl.evaluate --ckpt runs/tmr_joint/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805
+
+==============================================================================
+STEP 3: train on GQS883, replay PXB184 + RLW104 + TXB805, test on PXB184 RLW104 TXB805 GQS883
+==============================================================================
+
+--- vanilla (no replay, no buffer) ---
+train + test:
+python -m cl.train_session --init_ckpt runs/vanilla/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/vanilla/s3_GQS883 --steps 60000 --save_every 10000 --resume && python -m cl.evaluate --ckpt runs/vanilla/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- er (random buffers) ---
+buffer of TXB805:
+python -m cl.build_buffer --method random --subject TXB805 --session 2 --ckpt runs/er/s2_TXB805/model000060000.pt --out cl_data/buffers/er/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/er/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/er/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/er/s0_PXB184.json cl_data/buffers/er/s1_RLW104.json cl_data/buffers/er/s2_TXB805.json && python -m cl.evaluate --ckpt runs/er/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- star (random buffers + STAR) ---
+buffer of TXB805:
+python -m cl.build_buffer --method random --subject TXB805 --session 2 --ckpt runs/star/s2_TXB805/model000060000.pt --out cl_data/buffers/star/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/star/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/star/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/star/s0_PXB184.json cl_data/buffers/star/s1_RLW104.json cl_data/buffers/star/s2_TXB805.json --star && python -m cl.evaluate --ckpt runs/star/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- ocs ---
+buffer of TXB805:
+python -m cl.build_buffer --method ocs --subject TXB805 --session 2 --ckpt runs/ocs/s2_TXB805/model000060000.pt --out cl_data/buffers/ocs/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/ocs/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/ocs/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/ocs/s0_PXB184.json cl_data/buffers/ocs/s1_RLW104.json cl_data/buffers/ocs/s2_TXB805.json && python -m cl.evaluate --ckpt runs/ocs/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- gcr ---
+buffer of TXB805:
+python -m cl.build_buffer --method gcr --subject TXB805 --session 2 --ckpt runs/gcr/s2_TXB805/model000060000.pt --out cl_data/buffers/gcr/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/gcr/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/gcr/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/gcr/s0_PXB184.json cl_data/buffers/gcr/s1_RLW104.json cl_data/buffers/gcr/s2_TXB805.json && python -m cl.evaluate --ckpt runs/gcr/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- mir ---
+buffer of TXB805:
+python -m cl.build_buffer --method mir --subject TXB805 --session 2 --ckpt runs/mir/s2_TXB805/model000060000.pt --out cl_data/buffers/mir/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/mir/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/mir/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/mir/s0_PXB184.json cl_data/buffers/mir/s1_RLW104.json cl_data/buffers/mir/s2_TXB805.json && python -m cl.evaluate --ckpt runs/mir/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- csrel ---
+buffer of TXB805:
+python -m cl.build_buffer --method csrel --subject TXB805 --session 2 --ckpt runs/csrel/s2_TXB805/model000060000.pt --out cl_data/buffers/csrel/s2_TXB805.json --prev_ckpt runs/csrel/s1_RLW104/model000060000.pt
+train + test:
+python -m cl.train_session --init_ckpt runs/csrel/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/csrel/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/csrel/s0_PXB184.json cl_data/buffers/csrel/s1_RLW104.json cl_data/buffers/csrel/s2_TXB805.json && python -m cl.evaluate --ckpt runs/csrel/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- tmr (paper version) ---
+buffer of TXB805:
+python -m cl.build_buffer --method tmr --subject TXB805 --session 2 --ckpt runs/tmr/s2_TXB805/model000060000.pt --out cl_data/buffers/tmr/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/tmr/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/tmr/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/tmr/s0_PXB184.json cl_data/buffers/tmr/s1_RLW104.json cl_data/buffers/tmr/s2_TXB805.json && python -m cl.evaluate --ckpt runs/tmr/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+--- tmr_joint ---
+buffer of TXB805:
+python -m cl.build_buffer --method tmr_joint --subject TXB805 --session 2 --ckpt runs/tmr_joint/s2_TXB805/model000060000.pt --out cl_data/buffers/tmr_joint/s2_TXB805.json
+train + test:
+python -m cl.train_session --init_ckpt runs/tmr_joint/s2_TXB805/model000060000.pt --data_root dataset/GQS883 --save_dir runs/tmr_joint/s3_GQS883 --steps 60000 --save_every 10000 --resume --replay cl_data/buffers/tmr_joint/s0_PXB184.json cl_data/buffers/tmr_joint/s1_RLW104.json cl_data/buffers/tmr_joint/s2_TXB805.json && python -m cl.evaluate --ckpt runs/tmr_joint/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883
+
+==============================================================================
+RESULTS AND UPPER BOUND
+==============================================================================
+
+--- test every finished step of every baseline, then print the tables (GPU) ---
+Tests the released PXB184 model and each finished step on the subjects seen up to that step.
+Results that already exist are reused. Tables are also written to runs/table_test_seed0.md.
+python -m cl.summarize --evaluate
+
+--- tables only, from the results that already exist (no GPU) ---
+python -m cl.summarize
+
+--- joint upper bound: all four subjects together for 3 x 60000 steps ---
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/PXB184 dataset/RLW104 dataset/TXB805 dataset/GQS883 --save_dir runs/joint --steps 180000 --save_every 10000 --resume && python -m cl.evaluate --ckpt runs/joint/model000180000.pt --subjects PXB184 RLW104 TXB805 GQS883
