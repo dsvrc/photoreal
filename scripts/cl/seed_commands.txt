@@ -1,0 +1,101 @@
+EXTRA SEEDS FOR THE VARIANCE ANALYSIS, STEP 1 ONLY (train on RLW104, replay PXB184, test on PXB184 RLW104)
+Methods: gcr mir csrel tmr
+
+Run from the repo root in a2p_env:
+cd /scratch/ee/staff/kaizer1.cstaff/3d_new/photoreal
+
+What a seed is:
+- seed 0 is the run you already have: buffer --seed 0, train --seed 10 (the defaults), in runs/ and cl_data/buffers/.
+- seed 1: buffer --seed 1, train --seed 11, in runs_seed1/ and cl_data/buffers_seed1/.
+- seed 2: buffer --seed 2, train --seed 12, in runs_seed2/ and cl_data/buffers_seed2/.
+- The test keeps eval --seed 0 (the default), so every seed is tested with the same noise as seed 0.
+  The only differences between seeds are the buffer selection and the training.
+- TMR's selection uses no random numbers, so its PXB184 buffer is the same in all three seeds. Its
+  spread comes from training only. GCR, MIR and CSReL also pick a different buffer in each seed.
+
+How to use this file:
+- The 8 jobs below do not depend on each other, so each can have its own GPU.
+- "buffer" line: run it once. If the buffer file already exists, skip it.
+- "train + test" line: if training stops, run this same line again. It continues from the latest checkpoint.
+
+==============================================================================
+SEED 1
+==============================================================================
+
+--- gcr ---
+buffer of PXB184:
+python -m cl.build_buffer --method gcr --subject PXB184 --session 0 --seed 1 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed1/gcr/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed1/gcr/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 11 --replay cl_data/buffers_seed1/gcr/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed1/gcr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- mir ---
+buffer of PXB184:
+python -m cl.build_buffer --method mir --subject PXB184 --session 0 --seed 1 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed1/mir/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed1/mir/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 11 --replay cl_data/buffers_seed1/mir/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed1/mir/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- csrel ---
+buffer of PXB184:
+python -m cl.build_buffer --method csrel --subject PXB184 --session 0 --seed 1 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed1/csrel/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed1/csrel/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 11 --replay cl_data/buffers_seed1/csrel/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed1/csrel/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- tmr (paper version) ---
+buffer of PXB184:
+python -m cl.build_buffer --method tmr --subject PXB184 --session 0 --seed 1 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed1/tmr/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed1/tmr/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 11 --replay cl_data/buffers_seed1/tmr/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed1/tmr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+==============================================================================
+SEED 2
+==============================================================================
+
+--- gcr ---
+buffer of PXB184:
+python -m cl.build_buffer --method gcr --subject PXB184 --session 0 --seed 2 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed2/gcr/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed2/gcr/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 12 --replay cl_data/buffers_seed2/gcr/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed2/gcr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- mir ---
+buffer of PXB184:
+python -m cl.build_buffer --method mir --subject PXB184 --session 0 --seed 2 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed2/mir/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed2/mir/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 12 --replay cl_data/buffers_seed2/mir/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed2/mir/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- csrel ---
+buffer of PXB184:
+python -m cl.build_buffer --method csrel --subject PXB184 --session 0 --seed 2 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed2/csrel/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed2/csrel/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 12 --replay cl_data/buffers_seed2/csrel/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed2/csrel/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- tmr (paper version) ---
+buffer of PXB184:
+python -m cl.build_buffer --method tmr --subject PXB184 --session 0 --seed 2 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed2/tmr/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed2/tmr/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 12 --replay cl_data/buffers_seed2/tmr/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed2/tmr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+==============================================================================
+TMR_JOINT, SEEDS 1 AND 2 (its selection is seeded, so each seed picks its own buffer)
+==============================================================================
+
+--- tmr_joint, seed 1 ---
+buffer of PXB184:
+python -m cl.build_buffer --method tmr_joint --subject PXB184 --session 0 --seed 1 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed1/tmr_joint/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed1/tmr_joint/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 11 --replay cl_data/buffers_seed1/tmr_joint/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed1/tmr_joint/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+--- tmr_joint, seed 2 ---
+buffer of PXB184:
+python -m cl.build_buffer --method tmr_joint --subject PXB184 --session 0 --seed 2 --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --out cl_data/buffers_seed2/tmr_joint/s0_PXB184.json
+train + test:
+python -m cl.train_session --init_ckpt checkpoints/diffusion/c1_pose/model000340000.pt --data_root dataset/RLW104 --save_dir runs_seed2/tmr_joint/s1_RLW104 --steps 60000 --save_every 10000 --resume --seed 12 --replay cl_data/buffers_seed2/tmr_joint/s0_PXB184.json && python -m cl.evaluate --ckpt runs_seed2/tmr_joint/s1_RLW104/model000060000.pt --subjects PXB184 RLW104
+
+==============================================================================
+TABLES PER SEED (no GPU), once the jobs above are done
+==============================================================================
+
+python -m cl.summarize --runs runs_seed1 --methods gcr mir csrel tmr tmr_joint
+python -m cl.summarize --runs runs_seed2 --methods gcr mir csrel tmr tmr_joint
+
+Only the "After S0" and "After S1" rows are filled in; the later steps show "-".
+The seed 0 numbers are the ones already in runs/table_test_seed0.md.

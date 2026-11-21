@@ -1,0 +1,30 @@
+COLLECT THE AUDIO2PHOTOREAL NUMBERS FOR THE SUPPLEMENTARY
+Reads files only: no GPU, no training. A login node is fine. Takes a minute or two.
+
+Run from the repo root in a2p_env:
+cd /scratch/ee/staff/kaizer1.cstaff/3d_new/photoreal
+
+1) copy scripts/cl/collect_suppl.py to the server (git pull, or scp it into scripts/cl/)
+
+2) run it:
+python scripts/cl/collect_suppl.py
+
+3) send back this file (it holds everything printed):
+cl_data/suppl_report.txt
+   (cl_data/suppl_report.json has the same data in full, including every tensorboard file)
+
+If the PBS logs (*.o<jobid>) are not in the repo root, point the script at them:
+python scripts/cl/collect_suppl.py --logs "/path/to/logs/*.o*"
+
+If cl_data/manifest.json is missing, build it first (CPU, reads the dataset):
+python scripts/cl/prepare_data.py --data_root dataset --out cl_data
+
+What each section fills in sec/X_suppl.tex:
+[1] Tab. a2p_split: train scenes, train hours, candidates N / B, test chunks (LaTeX rows printed)
+[2] TMR paragraph of Sec. app:a2p: clips per TMR buffer vs budget, fw_stop, M_hat_k per session
+[3] Replay paragraph of Sec. app:a2p: whether any run was resumed after an interruption
+[4] FAQ "How reliable" (v): every method shares the seed and the start checkpoint of each session
+[5] Generator paragraph: the learning rate etc. of the released configuration
+[6] Tab. a2p: the FD_g in the draft checked against the eval files
+[7] training wall time per session
+[8] every buffer's size against its budget
