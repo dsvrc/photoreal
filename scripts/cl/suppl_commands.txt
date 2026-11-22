@@ -19,7 +19,16 @@ python scripts/cl/collect_suppl.py --logs "/path/to/logs/*.o*"
 If cl_data/manifest.json is missing, build it first (CPU, reads the dataset):
 python scripts/cl/prepare_data.py --data_root dataset --out cl_data
 
-What each section fills in sec/X_suppl.tex:
+SECOND SCRIPT: the Audio2Photoreal evidence under the proofs (CPU only, a few minutes).
+It needs the cached trajectories in cl_data/features/ (already there: the first report recomputed M_hat from them).
+python scripts/cl/collect_theory.py
+then send back:
+cl_data/theory_report.txt
+It gives, for the three TMR buffers: the rebuild check (FAQ "selection adds no noise"), eps_mod against the
+Prop. fw bound and its decay rate, the two parts of Lemma modal against their bounds, and the buffer overlap
+between n_eff = N*D and n_eff = N (Remark rank_whiten).
+
+What each section of the first report fills in sec/X_suppl.tex:
 [1] Tab. a2p_split: train scenes, train hours, candidates N / B, test chunks (LaTeX rows printed)
 [2] TMR paragraph of Sec. app:a2p: clips per TMR buffer vs budget, fw_stop, M_hat_k per session
 [3] Replay paragraph of Sec. app:a2p: whether any run was resumed after an interruption

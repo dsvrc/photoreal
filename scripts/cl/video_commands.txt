@@ -1,0 +1,31 @@
+COLLECT THE FINE-TUNING vs TMR CONVERSATION VIDEOS (server side)
+Rendering happens later on the local machine; this only gathers the inputs.
+
+Run from the repo root in a2p_env:
+cd /scratch/ee/staff/kaizer1.cstaff/3d_new/photoreal
+
+1) GPU: save the generated body poses of every test chunk (audio only, eval seed 0, the same noise as the
+   paper's numbers). Writes to cl_data/video_samples/ only; the eval JSONs of the runs are not touched.
+   About as long as the usual evaluation of each checkpoint. Each line is independent.
+
+python -m cl.evaluate --ckpt checkpoints/diffusion/c1_pose/model000340000.pt --subjects PXB184 --modes audio_only --save_samples --out_dir cl_data/video_samples/s0_s0
+python -m cl.evaluate --ckpt runs/vanilla/s1_RLW104/model000060000.pt --subjects PXB184 RLW104 --modes audio_only --save_samples --out_dir cl_data/video_samples/vanilla_s1
+python -m cl.evaluate --ckpt runs/vanilla/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805 --modes audio_only --save_samples --out_dir cl_data/video_samples/vanilla_s2
+python -m cl.evaluate --ckpt runs/vanilla/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883 --modes audio_only --save_samples --out_dir cl_data/video_samples/vanilla_s3
+python -m cl.evaluate --ckpt runs/tmr/s1_RLW104/model000060000.pt --subjects PXB184 RLW104 --modes audio_only --save_samples --out_dir cl_data/video_samples/tmr_s1
+python -m cl.evaluate --ckpt runs/tmr/s2_TXB805/model000060000.pt --subjects PXB184 RLW104 TXB805 --modes audio_only --save_samples --out_dir cl_data/video_samples/tmr_s2
+python -m cl.evaluate --ckpt runs/tmr/s3_GQS883/model000060000.pt --subjects PXB184 RLW104 TXB805 GQS883 --modes audio_only --save_samples --out_dir cl_data/video_samples/tmr_s3
+
+   Check: the FD_g each line prints should match the paper's Tab. a2p cell for that checkpoint and subject.
+
+2) CPU: pack samples, the audio and face codes of each chunk, the partner's real motion and the renderers
+python scripts/cl/collect_videos.py
+
+   Smaller pack (only PXB184 and RLW104, the earlier participants that forgetting hits):
+python scripts/cl/collect_videos.py --subjects PXB184 RLW104
+
+   If checkpoints/ca_body/data is somewhere else:
+python scripts/cl/collect_videos.py --renderer_root /path/to/ca_body/data
+
+3) copy to the local machine:
+cl_data/video_pack.tar.gz
