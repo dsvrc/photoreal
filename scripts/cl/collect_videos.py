@@ -1,12 +1,14 @@
 """
-Pack everything needed to render the fine-tuning vs TMR conversation videos on another machine.
-
-Run cl.evaluate with --save_samples first (scripts/cl/video_commands.txt). It writes the generated and
-ground-truth body poses of every test chunk to cl_data/video_samples/<method>_s<k>/. Then, CPU only:
+Generate and pack everything needed to render the fine-tuning vs TMR conversation videos on another machine.
+One GPU job, from the repo root in a2p_env:
 
     python scripts/cl/collect_videos.py
 
-and copy cl_data/video_pack.tar.gz to the rendering machine. The pack holds:
+Step 1 runs cl.evaluate --save_samples (audio only, eval seed 0: the same noise as the paper's numbers) on the
+released Session-0 model and on fine-tuning and TMR after Sessions 1-3, for the subjects seen so far. The
+generated and ground-truth body poses of every test chunk go to cl_data/video_samples/<method>_s<k>/; the
+runs' own eval files are not touched, and a checkpoint whose samples exist is skipped. Step 2 (CPU) packs them.
+Copy cl_data/video_pack.tar.gz to the rendering machine. The pack holds:
 
   samples/<method>_s<k>/<subject>.npz  pred, gt: [chunks x 600 x 104] joint angles (raw, as the renderer
                                        takes them), from the evaluation of the model after session k
@@ -52,6 +54,11 @@ def parse_args():
     p.add_argument("--chunks", type=int, nargs="*", default=None, help="chunk indices to pack (default: all)")
     p.add_argument("--no_renderer", action="store_true", help="skip ca_body (already on the rendering machine)")
     p.add_argument("--no_tar", action="store_true")
+    p.add_argument("--no_generate", action="store_true", help="only pack existing samples")
+    p.add_argument("--methods", nargs="+", default=["vanilla", "tmr"])
+    p.add_argument("--runs", default="runs")
+    p.add_argument("--steps", type=int, default=60000)
+    p.add_argument("--s0", default="checkpoints/diffusion/c1_pose/model000340000.pt")
     return p.parse_args()
 
 
@@ -63,8 +70,32 @@ def load_pose(path, subject, start, length):
     return pose
 
 
+def generate(a):
+    """cl.evaluate --save_samples on every checkpoint, for the subjects seen so far (skips what exists)."""
+    import subprocess
+
+    for method in a.methods:
+        for k in range(len(ORDER)):
+            if k == 0 and method != a.methods[0]:
+                continue  # session 0 is the shared released model: once
+            ckpt = a.s0 if k == 0 else os.path.join(a.runs, method, f"s{k}_{ORDER[k]}", f"model{a.steps:09d}.pt")
+            tag = "s0_s0" if k == 0 else f"{method}_s{k}"
+            if not os.path.exists(ckpt):
+                print(f"skip {tag}: no {ckpt}")
+                continue
+            print(f"\n== generating {tag}: {ckpt}", flush=True)
+            subprocess.run(
+                [sys.executable, "-m", "cl.evaluate", "--ckpt", ckpt, "--subjects", *ORDER[: k + 1],
+                 "--modes", "audio_only", "--save_samples", "--manifest", a.manifest,
+                 "--out_dir", os.path.join(a.samples_dir, tag)],
+                check=True,
+            )
+
+
 def main():
     a = parse_args()
+    if not a.no_generate:
+        generate(a)
     import torchaudio  # server env
 
     with open(a.manifest) as f:
