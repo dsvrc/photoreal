@@ -17,6 +17,13 @@ Then copy to the local machine:
 cl_data/qual_pack.tar.gz
 (cl_data/video_pack.tar.gz and cl_data/video_pack/ of the earlier run can be deleted)
 
+THE CONVERSATION PARTNER (RLW104) of the same chunks: recorded body and face, and its renderer (about 1.2 GB).
+CPU only, reads cl_data/qual_pack/rows.npz from the run above:
+python scripts/cl/collect_partner.py
+Then copy to the local machine:
+cl_data/partner_pack.tar.gz
+(If the earlier cl_data/video_pack/ is still on the server, it already has ca_body/RLW104; nothing to change.)
+
 Options:
 other chunks (indices from qual_pack/scores.csv):   --chunks 5 17 40
 more chunks:                                          --num_chunks 5
