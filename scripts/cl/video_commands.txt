@@ -1,16 +1,24 @@
-COLLECT THE FINE-TUNING vs TMR CONVERSATION VIDEOS (server side)
-One script generates the samples (GPU) and packs them. Rendering happens later on the local machine.
+COLLECT THE QUALITATIVE AUDIO2PHOTOREAL DATA (Sec. app:qual)
+Generates the samples (GPU) and packs only what the local machine needs to render. Nothing is rendered here.
 
 Run from the repo root in a2p_env, on a GPU node:
 cd /scratch/ee/staff/kaizer1.cstaff/3d_new/photoreal
 python scripts/cl/collect_videos.py
 
-Smaller pack (only PXB184 and RLW104, the earlier participants that forgetting hits):
-python scripts/cl/collect_videos.py --subjects PXB184 RLW104
+Rows: Real | Session-0 model | Fine-tuning after Sessions 1, 2, 3 | TMR after Session 3 | TMR-joint after Session 3
+Participant PXB184 (learned in Session 0), 3 test chunks with the most real motion.
+The samples of the earlier run in cl_data/video_samples/ are reused; only TMR-joint is generated new.
+The pack is the chunk data (a few MB) plus the 3 renderer files of PXB184.
 
-If it stops: run the same line again. Checkpoints whose samples exist are skipped.
-If checkpoints/ca_body/data is somewhere else, add: --renderer_root /path/to/ca_body/data
-Check: the FD_g printed for each checkpoint and subject should match the paper's Tab. a2p cell.
+If the renderer of PXB184 is already on the local machine (it is in the earlier video_pack, under ca_body/PXB184):
+python scripts/cl/collect_videos.py --no_renderer
 
 Then copy to the local machine:
-cl_data/video_pack.tar.gz
+cl_data/qual_pack.tar.gz
+(cl_data/video_pack.tar.gz and cl_data/video_pack/ of the earlier run can be deleted)
+
+Options:
+other chunks (indices from qual_pack/scores.csv):   --chunks 5 17 40
+more chunks:                                          --num_chunks 5
+without the TMR-joint row:                            --no_joint
+RLW104 instead (learned in Session 1):               --subject RLW104
